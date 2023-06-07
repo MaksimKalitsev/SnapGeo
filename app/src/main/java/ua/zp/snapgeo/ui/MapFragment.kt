@@ -26,18 +26,13 @@ import com.google.android.gms.maps.model.MarkerOptions
 import ua.zp.snapgeo.R
 import ua.zp.snapgeo.databinding.FragmentMapBinding
 
-class MapFragment : Fragment(), OnMapReadyCallback {
+class MapFragment : Fragment() {
 
     private var _binding: FragmentMapBinding? = null
     private val binding get() = _binding!!
-    private lateinit var mMap: GoogleMap
+
     private lateinit var viewModel: MapViewModel
-    private val LOCATION_PERMISSION = 42
-    private val CAMERA_PERMISSION = 43
-    private var isMapReady = false
-    private var hasLocationPermission = false
-    private lateinit var fusedLocationClient: FusedLocationProviderClient
-    private lateinit var locationCallback: LocationCallback
+
 
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?,
@@ -51,175 +46,5 @@ class MapFragment : Fragment(), OnMapReadyCallback {
         super.onViewCreated(view, savedInstanceState)
 
         val mapFragment = childFragmentManager.findFragmentById(R.id.map) as SupportMapFragment
-
-        fusedLocationClient = LocationServices.getFusedLocationProviderClient(requireActivity())
-
-        mapFragment.getMapAsync(this)
-
-        val fabPhotoCamera = binding.fabPhotoCamera
-        fabPhotoCamera.setOnClickListener {
-            if (ContextCompat.checkSelfPermission(
-                    requireContext(),
-                    Manifest.permission.CAMERA
-                ) == PackageManager.PERMISSION_GRANTED
-            ) {
-                val cameraIntent = Intent(MediaStore.ACTION_IMAGE_CAPTURE)
-                startActivity(cameraIntent)
-            } else {
-                ActivityCompat.requestPermissions(
-                    requireActivity(),
-                    arrayOf(Manifest.permission.CAMERA),
-                    CAMERA_PERMISSION
-                )
-            }
-        }
-        permissionOfTheExactLocation()
-    }
-    override fun onResume() {
-        super.onResume()
-        if( ::mMap. isInitialized ) {
-            initLocationTracking()
-        }
-    }
-
-    override fun onPause() {
-        super.onPause()
-        fusedLocationClient.removeLocationUpdates(locationCallback)
-    }
-
-    override fun onMapReady(googleMap: GoogleMap) {
-        mMap = googleMap
-        isMapReady = true
-        if (hasLocationPermission) {
-            initMap()
-        }
-    }
-
-    private fun permissionOfTheExactLocation() {
-        if (ContextCompat.checkSelfPermission(
-                requireContext(),
-                Manifest.permission.ACCESS_FINE_LOCATION
-            )
-            == PackageManager.PERMISSION_GRANTED
-        ) {
-            hasLocationPermission = true
-            if (isMapReady) {
-                initMap()
-            }
-        } else {
-            ActivityCompat.requestPermissions(
-                requireActivity(),
-                arrayOf(Manifest.permission.ACCESS_FINE_LOCATION),
-                LOCATION_PERMISSION
-            )
-        }
-    }
-
-    private fun initMap() {
-        if (ActivityCompat.checkSelfPermission(
-                requireContext(),
-                Manifest.permission.ACCESS_FINE_LOCATION
-            ) != PackageManager.PERMISSION_GRANTED && ActivityCompat.checkSelfPermission(
-                requireContext(),
-                Manifest.permission.ACCESS_COARSE_LOCATION
-            ) != PackageManager.PERMISSION_GRANTED
-        ) {
-            // TODO: Consider calling
-            //    ActivityCompat#requestPermissions
-            // here to request the missing permissions, and then overriding
-            //   public void onRequestPermissionsResult(int requestCode, String[] permissions,
-            //                                          int[] grantResults)
-            // to handle the case where the user grants the permission. See the documentation
-            // for ActivityCompat#requestPermissions for more details.
-            return
-        }
-        mMap.isMyLocationEnabled = true
-        fusedLocationClient.lastLocation
-            .addOnSuccessListener { location : Location? ->
-                updateMapLocation(location)
-            }
-        initLocationTracking()
-    }
-
-    @Deprecated("Deprecated in Java")
-    override fun onRequestPermissionsResult(
-        requestCode: Int,
-        permissions: Array<out String>,
-        grantResults: IntArray
-    ) {
-        super.onRequestPermissionsResult(
-            requestCode,
-            permissions,
-            grantResults
-        )
-        when (requestCode) {
-            LOCATION_PERMISSION -> {
-                if (permissions.isNotEmpty() &&
-                    permissions[0] == Manifest.permission.ACCESS_FINE_LOCATION &&
-                    grantResults.isNotEmpty() &&
-                    grantResults[0] == PackageManager.PERMISSION_GRANTED
-                ) {
-                    initMap()
-                } else {
-                    // Handle the case where the user denies the location permission
-                }
-            }
-
-            CAMERA_PERMISSION -> {
-                if (permissions.isNotEmpty() &&
-                    permissions[0] == Manifest.permission.CAMERA &&
-                    grantResults.isNotEmpty() &&
-                    grantResults[0] == PackageManager.PERMISSION_GRANTED
-                ) {
-                    val cameraIntent = Intent(MediaStore.ACTION_IMAGE_CAPTURE)
-                    startActivity(cameraIntent)
-                } else {
-                    // Handle the case where the user denies the camera permission
-                }
-            }
-        }
-    }
-
-    private fun updateMapLocation(location: Location?) {
-        mMap.moveCamera(
-            CameraUpdateFactory.newLatLng(
-                LatLng(
-                    location?.latitude ?: 0.0,
-                    location?.longitude ?: 0.0
-                )
-            )
-        )
-        mMap.moveCamera(CameraUpdateFactory.zoomTo(15.0f))
-    }
-
-    private fun initLocationTracking() {
-        locationCallback = object : LocationCallback() {
-            override fun onLocationResult(locationResult: LocationResult) {
-                for (location in locationResult.locations) {
-                    updateMapLocation(location)
-                }
-            }
-        }
-        if (ActivityCompat.checkSelfPermission(
-                requireContext(),
-                Manifest.permission.ACCESS_FINE_LOCATION
-            ) != PackageManager.PERMISSION_GRANTED && ActivityCompat.checkSelfPermission(
-                requireContext(),
-                Manifest.permission.ACCESS_COARSE_LOCATION
-            ) != PackageManager.PERMISSION_GRANTED
-        ) {
-            // TODO: Consider calling
-            //    ActivityCompat#requestPermissions
-            // here to request the missing permissions, and then overriding
-            //   public void onRequestPermissionsResult(int requestCode, String[] permissions,
-            //                                          int[] grantResults)
-            // to handle the case where the user grants the permission. See the documentation
-            // for ActivityCompat#requestPermissions for more details.
-            return
-        }
-        fusedLocationClient.requestLocationUpdates(
-            LocationRequest( ),
-            locationCallback,
-            null)
     }
 }

@@ -1,14 +1,24 @@
 package ua.zp.snapgeo.ui
 
 import android.Manifest
+import android.app.Activity
 import android.app.AlertDialog
+import android.content.ContentValues
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.location.Geocoder
 import android.location.Location
+import android.media.ExifInterface
+import android.net.Uri
 import android.os.Bundle
+import android.os.Environment
 import android.os.Looper
+import android.provider.MediaStore
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
@@ -27,15 +37,19 @@ import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.MarkerOptions
 import ua.zp.snapgeo.R
 import ua.zp.snapgeo.databinding.FragmentMapBinding
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 open class MapFragment : Fragment(), OnMapReadyCallback {
 
     private var _binding: FragmentMapBinding? = null
     private val binding get() = _binding!!
 
-    private lateinit var viewModel: MapViewModel
+//    private lateinit var viewModel: MapViewModel
 
-    val MY_PERMISSIONS_REQUEST_LOCATION = 99
+    private val MY_PERMISSIONS_REQUEST_LOCATION = 99
 
     var mLocationRequest: LocationRequest? = null
     var mLastLocation: Location? = null
@@ -44,6 +58,10 @@ open class MapFragment : Fragment(), OnMapReadyCallback {
     var mFusedLocationClient: FusedLocationProviderClient? = null
 
     private lateinit var mGoogleMap: GoogleMap
+
+    private lateinit var photoFile: File
+
+    private lateinit var takePictureResult: ActivityResultLauncher<Intent>
 
 
     override fun onCreateView(
@@ -61,6 +79,18 @@ open class MapFragment : Fragment(), OnMapReadyCallback {
 
         val mapFragment = childFragmentManager.findFragmentById(R.id.map) as SupportMapFragment
         mapFragment.getMapAsync(this)
+
+        takePictureResult = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            if (result.resultCode == Activity.RESULT_OK) {
+                // фотографія була успішно знята, ваш файл наявний в photoFile
+            } else {
+                // зняття фотографії було скасоване або відбулася помилка
+            }
+        }
+
+        binding.fabPhotoCamera.setOnClickListener {
+            takePictureAndSaveToGallery()
+        }
     }
 
     override fun onMapReady(googleMap: GoogleMap) {
@@ -140,7 +170,6 @@ open class MapFragment : Fragment(), OnMapReadyCallback {
                     requireActivity(), Manifest.permission.ACCESS_FINE_LOCATION
                 )
             ) {
-
                 // Show an explanation to the user *asynchronously* -- don't block
                 // this thread waiting for the user's response! After the user
                 // sees the explanation, try again to request the permission.
@@ -156,7 +185,6 @@ open class MapFragment : Fragment(), OnMapReadyCallback {
                         )
                     }.create().show()
             } else {
-                // No explanation needed, we can request the permission.
                 ActivityCompat.requestPermissions(
                     requireActivity(),
                     arrayOf(Manifest.permission.ACCESS_FINE_LOCATION),
@@ -165,4 +193,60 @@ open class MapFragment : Fragment(), OnMapReadyCallback {
             }
         }
     }
+
+    private fun takePictureAndSaveToGallery() {
+        Intent(MediaStore.ACTION_IMAGE_CAPTURE).also { takePictureIntent ->
+            takePictureIntent.resolveActivity(requireActivity().packageManager)?.also {
+                val timeStamp: String =
+                    SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+                val storageDir: File? = requireContext().getExternalFilesDir(Environment.DIRECTORY_PICTURES)
+                photoFile = File.createTempFile("JPEG_${timeStamp}_", ".jpg", storageDir).apply {
+                    val contentValues = ContentValues().apply {
+                        put(MediaStore.MediaColumns.DISPLAY_NAME, name)
+                        put(MediaStore.MediaColumns.MIME_TYPE, "image/jpg")
+                        put(MediaStore.MediaColumns.RELATIVE_PATH, "DCIM/" + name)
+                    }
+                    val uri: Uri? = requireContext().contentResolver.insert(
+                        MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                        contentValues
+                    )
+                    takePictureIntent.putExtra(MediaStore.EXTRA_OUTPUT, uri)
+                }
+                takePictureResult.launch(takePictureIntent)
+            }
+        }
+    }
+    private fun getPhotoLocation(photoFile: File): String? {
+        val exifInterface = ExifInterface(photoFile.absolutePath)
+        val latLong = FloatArray(2)
+
+        if (exifInterface.getLatLong(latLong)) {
+            val latitude = latLong[0].toDouble()
+            val longitude = latLong[1].toDouble()
+            val geocoder = Geocoder(requireContext(), Locale.getDefault())
+            val addresses = geocoder.getFromLocation(latitude, longitude, 1)
+            if (addresses != null) {
+                if (addresses.isNotEmpty()) {
+                    val address = addresses[0]
+                    return address.getAddressLine(0)
+                }
+            }
+        }
+        return null
+    }
+
+//    companion object {
+//        private const val TAG = "CameraXTest"
+//        private const val FILENAME_FORMAT = "yyyy-MM-dd-HH-mm-ss-SSS"
+//        const val REQUEST_IMAGE_CAPTURE = 1
+//        private val REQUIRED_PERMISSIONS =
+//            mutableListOf(
+//                Manifest.permission.CAMERA,
+//                Manifest.permission.RECORD_AUDIO
+//            ).apply {
+//                if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
+//                    add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+//                }
+//            }.toTypedArray()
+//    }
 }

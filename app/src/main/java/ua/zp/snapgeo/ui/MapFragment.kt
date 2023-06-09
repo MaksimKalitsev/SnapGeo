@@ -4,8 +4,10 @@ import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.ContentValues
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.location.Address
 import android.location.Geocoder
 import android.location.Location
 import android.media.ExifInterface
@@ -21,6 +23,7 @@ import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.fragment.app.Fragment
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationCallback
@@ -36,13 +39,15 @@ import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.MarkerOptions
 import ua.zp.snapgeo.R
+import ua.zp.snapgeo.data.PhotoLocation
 import ua.zp.snapgeo.databinding.FragmentMapBinding
 import java.io.File
+import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-open class MapFragment : Fragment(), OnMapReadyCallback {
+class MapFragment : Fragment(), OnMapReadyCallback {
 
     private var _binding: FragmentMapBinding? = null
     private val binding get() = _binding!!
@@ -59,7 +64,7 @@ open class MapFragment : Fragment(), OnMapReadyCallback {
 
     private lateinit var mGoogleMap: GoogleMap
 
-    private lateinit var photoFile: File
+    private lateinit var photoURI: Uri
 
     private lateinit var takePictureResult: ActivityResultLauncher<Intent>
 
@@ -80,13 +85,14 @@ open class MapFragment : Fragment(), OnMapReadyCallback {
         val mapFragment = childFragmentManager.findFragmentById(R.id.map) as SupportMapFragment
         mapFragment.getMapAsync(this)
 
-        takePictureResult = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-            if (result.resultCode == Activity.RESULT_OK) {
-                // фотографія була успішно знята, ваш файл наявний в photoFile
-            } else {
-                // зняття фотографії було скасоване або відбулася помилка
+        takePictureResult =
+            registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+                if (result.resultCode == Activity.RESULT_OK) {
+                    // фотографія була успішно знята, ваш файл наявний в photoFile
+                } else {
+                    // зняття фотографії було скасоване або відбулася помилка
+                }
             }
-        }
 
         binding.fabPhotoCamera.setOnClickListener {
             takePictureAndSaveToGallery()
@@ -95,6 +101,15 @@ open class MapFragment : Fragment(), OnMapReadyCallback {
 
     override fun onMapReady(googleMap: GoogleMap) {
         mGoogleMap = googleMap
+
+        requireContext().filesDir
+        requireContext().cacheDir
+//        val photoFilePath = photoFile.absolutePath
+//        val photoLocation = getPhotoLocation(photoFile)
+
+//        if (photoLocation != null) {
+//            addMarkerPhotoToMap(photoLocation)
+//        }
 
         mLocationRequest =
             LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 12000).apply {
@@ -128,28 +143,22 @@ open class MapFragment : Fragment(), OnMapReadyCallback {
         override fun onLocationResult(locationResult: LocationResult) {
             val locationList = locationResult.locations
             if (locationList.size > 0) {
-                //The last location in the list is the newest
+
                 val location = locationList[locationList.size - 1]
                 mLastLocation = location
                 val latLng = LatLng(location.latitude, location.longitude)
-                // Creating a marker
-                val markerOptions = MarkerOptions()
 
-                // Setting the position for the marker
-                markerOptions.position(latLng)
+//                val markerOptions = MarkerOptions()
+//
+//                markerOptions.position(latLng)
+//
+//                markerOptions.title(location.latitude.toString() + " : " + location.longitude)
 
-                // Setting the title for the marker.
-                // This will be displayed on taping the marker
-                markerOptions.title(location.latitude.toString() + " : " + location.longitude)
-
-                // Clears the previously touched position
                 mGoogleMap.clear()
 
-                // Animating to the touched position
                 mGoogleMap.animateCamera(CameraUpdateFactory.newLatLng(latLng))
 
-                // Placing a marker on the touched position
-                mGoogleMap.addMarker(markerOptions)
+//                mGoogleMap.addMarker(markerOptions)
                 val cameraPosition =
                     CameraPosition.Builder().target(LatLng(latLng.latitude, latLng.longitude))
                         .zoom(18f).build()
@@ -158,26 +167,27 @@ open class MapFragment : Fragment(), OnMapReadyCallback {
         }
     }
 
+    private fun addMarkerPhotoToMap(photoLocation: PhotoLocation) {
+        val location = LatLng(photoLocation.latitude, photoLocation.longitude)
+        mGoogleMap.addMarker(MarkerOptions().position(location).title(photoLocation.address))
+        mGoogleMap.moveCamera(CameraUpdateFactory.newLatLngZoom(location, 15f))
+    }
+
 
     private fun checkLocationPermission() {
         if (ContextCompat.checkSelfPermission(
                 requireContext(), Manifest.permission.ACCESS_FINE_LOCATION
             ) != PackageManager.PERMISSION_GRANTED
         ) {
-
-            // Should we show an explanation?
             if (ActivityCompat.shouldShowRequestPermissionRationale(
                     requireActivity(), Manifest.permission.ACCESS_FINE_LOCATION
                 )
             ) {
-                // Show an explanation to the user *asynchronously* -- don't block
-                // this thread waiting for the user's response! After the user
-                // sees the explanation, try again to request the permission.
                 AlertDialog.Builder(requireContext()).setTitle("Location Permission Needed")
                     .setMessage("This app needs the Location permission, please accept to use location functionality")
                     .setPositiveButton(
                         "OK"
-                    ) { _, i -> //Prompt the user once explanation has been shown
+                    ) { _, i ->
                         ActivityCompat.requestPermissions(
                             requireActivity(),
                             arrayOf(Manifest.permission.ACCESS_FINE_LOCATION),
@@ -199,40 +209,65 @@ open class MapFragment : Fragment(), OnMapReadyCallback {
             takePictureIntent.resolveActivity(requireActivity().packageManager)?.also {
                 val timeStamp: String =
                     SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
-                val storageDir: File? = requireContext().getExternalFilesDir(Environment.DIRECTORY_PICTURES)
-                photoFile = File.createTempFile("JPEG_${timeStamp}_", ".jpg", storageDir).apply {
-                    val contentValues = ContentValues().apply {
-                        put(MediaStore.MediaColumns.DISPLAY_NAME, name)
-                        put(MediaStore.MediaColumns.MIME_TYPE, "image/jpg")
-                        put(MediaStore.MediaColumns.RELATIVE_PATH, "DCIM/" + name)
-                    }
-                    val uri: Uri? = requireContext().contentResolver.insert(
-                        MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                        contentValues
+                val filename = "JPEG_${timeStamp}_"
+
+                val values = ContentValues().apply {
+                    put(MediaStore.Images.Media.DISPLAY_NAME, "$filename.jpg")
+                    put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+                    put(
+                        MediaStore.Images.Media.RELATIVE_PATH,
+                        Environment.DIRECTORY_PICTURES + File.separator + "SnapGeo"
                     )
-                    takePictureIntent.putExtra(MediaStore.EXTRA_OUTPUT, uri)
                 }
+
+                val resolver = requireContext().contentResolver
+                photoURI = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)!!
+
+                takePictureIntent.putExtra(MediaStore.EXTRA_OUTPUT, photoURI)
                 takePictureResult.launch(takePictureIntent)
             }
+
         }
     }
-    private fun getPhotoLocation(photoFile: File): String? {
+
+    private fun getPhotoLocation(photoFile: File): PhotoLocation? {
         val exifInterface = ExifInterface(photoFile.absolutePath)
         val latLong = FloatArray(2)
 
-        if (exifInterface.getLatLong(latLong)) {
+        return if (exifInterface.getLatLong(latLong)) {
             val latitude = latLong[0].toDouble()
             val longitude = latLong[1].toDouble()
-            val geocoder = Geocoder(requireContext(), Locale.getDefault())
-            val addresses = geocoder.getFromLocation(latitude, longitude, 1)
-            if (addresses != null) {
-                if (addresses.isNotEmpty()) {
-                    val address = addresses[0]
-                    return address.getAddressLine(0)
-                }
-            }
+            val address = getAddressFromCoordinates(requireContext(), latitude, longitude)
+            PhotoLocation(latitude, longitude, address)
+        } else {
+            null
         }
-        return null
+    }
+
+    private fun getAddressFromCoordinates(
+        context: Context,
+        latitude: Double,
+        longitude: Double
+    ): String {
+        val geocoder = Geocoder(context, Locale.getDefault())
+        var addressText = ""
+
+        try {
+            val addresses: List<Address>? = geocoder.getFromLocation(latitude, longitude, 1)
+            if (!addresses.isNullOrEmpty()) {
+                val address: Address = addresses[0]
+                addressText = address.getAddressLine(0)
+                // Додаткові деталі адреси:
+                // val city = address.locality
+                // val state = address.adminArea
+                // val country = address.countryName
+                // val postalCode = address.postalCode
+                // ...
+            }
+        } catch (e: IOException) {
+            e.printStackTrace()
+        }
+        return addressText
     }
 
 //    companion object {

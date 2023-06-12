@@ -3,6 +3,7 @@ package ua.zp.snapgeo.ui
 import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
+import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
@@ -23,7 +24,6 @@ import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import androidx.core.content.FileProvider
 import androidx.fragment.app.Fragment
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationCallback
@@ -38,23 +38,27 @@ import com.google.android.gms.maps.SupportMapFragment
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.MarkerOptions
+import com.karumi.dexter.Dexter
+import com.karumi.dexter.MultiplePermissionsReport
+import com.karumi.dexter.PermissionToken
+import com.karumi.dexter.listener.PermissionRequest
+import com.karumi.dexter.listener.multi.MultiplePermissionsListener
 import ua.zp.snapgeo.R
 import ua.zp.snapgeo.data.PhotoLocation
 import ua.zp.snapgeo.databinding.FragmentMapBinding
 import java.io.File
+import java.io.FileNotFoundException
 import java.io.IOException
+import java.io.InputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+
 
 class MapFragment : Fragment(), OnMapReadyCallback {
 
     private var _binding: FragmentMapBinding? = null
     private val binding get() = _binding!!
-
-//    private lateinit var viewModel: MapViewModel
-
-    private val MY_PERMISSIONS_REQUEST_LOCATION = 99
 
     var mLocationRequest: LocationRequest? = null
     var mLastLocation: Location? = null
@@ -88,7 +92,10 @@ class MapFragment : Fragment(), OnMapReadyCallback {
         takePictureResult =
             registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
                 if (result.resultCode == Activity.RESULT_OK) {
-                    // фотографія була успішно знята, ваш файл наявний в photoFile
+                    val photoLocation = getPhotoLocation(photoURI)
+                    photoLocation?.let {
+                        addMarkerPhotoToMap(it)
+                    }
                 } else {
                     // зняття фотографії було скасоване або відбулася помилка
                 }
@@ -102,15 +109,6 @@ class MapFragment : Fragment(), OnMapReadyCallback {
     override fun onMapReady(googleMap: GoogleMap) {
         mGoogleMap = googleMap
 
-        requireContext().filesDir
-        requireContext().cacheDir
-//        val photoFilePath = photoFile.absolutePath
-//        val photoLocation = getPhotoLocation(photoFile)
-
-//        if (photoLocation != null) {
-//            addMarkerPhotoToMap(photoLocation)
-//        }
-
         mLocationRequest =
             LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 12000).apply {
                 setWaitForAccurateLocation(true)
@@ -121,15 +119,45 @@ class MapFragment : Fragment(), OnMapReadyCallback {
                 requireContext(), Manifest.permission.ACCESS_FINE_LOCATION
             ) == PackageManager.PERMISSION_GRANTED
         ) {
-            //Location Permission already granted
             mFusedLocationClient!!.requestLocationUpdates(
                 mLocationRequest!!, mLocationCallback, Looper.myLooper()
             )
             mGoogleMap.isMyLocationEnabled = true
         } else {
-            //Request Location Permission
-            checkLocationPermission()
+            checkPermissions()
         }
+
+        val projection = arrayOf(
+            MediaStore.Images.Media._ID,
+            MediaStore.Images.Media.DISPLAY_NAME,
+            MediaStore.Images.Media.RELATIVE_PATH
+        )
+        val selection = "${MediaStore.Images.Media.RELATIVE_PATH} LIKE ?"
+        val selectionArgs = arrayOf("%SnapGeo%")
+        val cursor = requireActivity().contentResolver.query(
+            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+            projection,
+            selection,
+            selectionArgs,
+            null
+        )
+
+        cursor?.use {
+            val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
+            while (cursor.moveToNext()) {
+                val id = cursor.getLong(idColumn)
+                val contentUri = ContentUris.withAppendedId(
+                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                    id
+                )
+
+                val photoLocation = getPhotoLocation(contentUri)
+                photoLocation?.let {
+                    addMarkerPhotoToMap(it)
+                }
+            }
+        }
+
     }
 
     override fun onPause() {
@@ -148,17 +176,8 @@ class MapFragment : Fragment(), OnMapReadyCallback {
                 mLastLocation = location
                 val latLng = LatLng(location.latitude, location.longitude)
 
-//                val markerOptions = MarkerOptions()
-//
-//                markerOptions.position(latLng)
-//
-//                markerOptions.title(location.latitude.toString() + " : " + location.longitude)
-
-                mGoogleMap.clear()
-
                 mGoogleMap.animateCamera(CameraUpdateFactory.newLatLng(latLng))
 
-//                mGoogleMap.addMarker(markerOptions)
                 val cameraPosition =
                     CameraPosition.Builder().target(LatLng(latLng.latitude, latLng.longitude))
                         .zoom(18f).build()
@@ -171,37 +190,6 @@ class MapFragment : Fragment(), OnMapReadyCallback {
         val location = LatLng(photoLocation.latitude, photoLocation.longitude)
         mGoogleMap.addMarker(MarkerOptions().position(location).title(photoLocation.address))
         mGoogleMap.moveCamera(CameraUpdateFactory.newLatLngZoom(location, 15f))
-    }
-
-
-    private fun checkLocationPermission() {
-        if (ContextCompat.checkSelfPermission(
-                requireContext(), Manifest.permission.ACCESS_FINE_LOCATION
-            ) != PackageManager.PERMISSION_GRANTED
-        ) {
-            if (ActivityCompat.shouldShowRequestPermissionRationale(
-                    requireActivity(), Manifest.permission.ACCESS_FINE_LOCATION
-                )
-            ) {
-                AlertDialog.Builder(requireContext()).setTitle("Location Permission Needed")
-                    .setMessage("This app needs the Location permission, please accept to use location functionality")
-                    .setPositiveButton(
-                        "OK"
-                    ) { _, i ->
-                        ActivityCompat.requestPermissions(
-                            requireActivity(),
-                            arrayOf(Manifest.permission.ACCESS_FINE_LOCATION),
-                            MY_PERMISSIONS_REQUEST_LOCATION
-                        )
-                    }.create().show()
-            } else {
-                ActivityCompat.requestPermissions(
-                    requireActivity(),
-                    arrayOf(Manifest.permission.ACCESS_FINE_LOCATION),
-                    MY_PERMISSIONS_REQUEST_LOCATION
-                )
-            }
-        }
     }
 
     private fun takePictureAndSaveToGallery() {
@@ -230,18 +218,32 @@ class MapFragment : Fragment(), OnMapReadyCallback {
         }
     }
 
-    private fun getPhotoLocation(photoFile: File): PhotoLocation? {
-        val exifInterface = ExifInterface(photoFile.absolutePath)
-        val latLong = FloatArray(2)
+    private fun getPhotoLocation(photoUri: Uri): PhotoLocation? {
+        val inputStream: InputStream? = try {
+            requireContext().contentResolver.openInputStream(photoUri)
+        } catch (e: FileNotFoundException) {
+            e.printStackTrace()
+            return null
+        }
 
-        return if (exifInterface.getLatLong(latLong)) {
+        val exifInterface = inputStream?.let {
+            try {
+                ExifInterface(it)
+            } catch (e: IOException) {
+                e.printStackTrace()
+                return null
+            }
+        }
+
+        val latLong = FloatArray(2)
+        if (exifInterface?.getLatLong(latLong) == true) {
             val latitude = latLong[0].toDouble()
             val longitude = latLong[1].toDouble()
             val address = getAddressFromCoordinates(requireContext(), latitude, longitude)
-            PhotoLocation(latitude, longitude, address)
-        } else {
-            null
+            return PhotoLocation(latitude, longitude, address)
         }
+
+        return null
     }
 
     private fun getAddressFromCoordinates(
@@ -257,12 +259,6 @@ class MapFragment : Fragment(), OnMapReadyCallback {
             if (!addresses.isNullOrEmpty()) {
                 val address: Address = addresses[0]
                 addressText = address.getAddressLine(0)
-                // Додаткові деталі адреси:
-                // val city = address.locality
-                // val state = address.adminArea
-                // val country = address.countryName
-                // val postalCode = address.postalCode
-                // ...
             }
         } catch (e: IOException) {
             e.printStackTrace()
@@ -270,18 +266,48 @@ class MapFragment : Fragment(), OnMapReadyCallback {
         return addressText
     }
 
-//    companion object {
-//        private const val TAG = "CameraXTest"
-//        private const val FILENAME_FORMAT = "yyyy-MM-dd-HH-mm-ss-SSS"
-//        const val REQUEST_IMAGE_CAPTURE = 1
-//        private val REQUIRED_PERMISSIONS =
-//            mutableListOf(
-//                Manifest.permission.CAMERA,
-//                Manifest.permission.RECORD_AUDIO
-//            ).apply {
-//                if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
-//                    add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
-//                }
-//            }.toTypedArray()
-//    }
+    private fun checkPermissions() {
+        Dexter.withContext(requireContext())
+            .withPermissions(
+                Manifest.permission.ACCESS_FINE_LOCATION,
+                Manifest.permission.CAMERA
+            )
+            .withListener(object : MultiplePermissionsListener {
+                override fun onPermissionsChecked(report: MultiplePermissionsReport) {
+                    if (report.areAllPermissionsGranted()) {
+                        if (ActivityCompat.checkSelfPermission(
+                                requireContext(),
+                                Manifest.permission.ACCESS_FINE_LOCATION
+                            ) != PackageManager.PERMISSION_GRANTED && ActivityCompat.checkSelfPermission(
+                                requireContext(),
+                                Manifest.permission.ACCESS_COARSE_LOCATION
+                            ) != PackageManager.PERMISSION_GRANTED
+                        ) {
+                            return
+                        }
+                        mFusedLocationClient!!.requestLocationUpdates(
+                            mLocationRequest!!, mLocationCallback, Looper.myLooper()
+                        )
+                        mGoogleMap.isMyLocationEnabled = true
+                    }
+
+                    if (report.isAnyPermissionPermanentlyDenied) {
+                        // navigate user to app settings
+                    }
+                }
+
+                override fun onPermissionRationaleShouldBeShown(
+                    permissions: MutableList<PermissionRequest>?,
+                    token: PermissionToken?
+                ) {
+                    AlertDialog.Builder(requireContext()).setTitle("Permissions Required")
+                        .setMessage("This app needs the Location, Camera, and Write External Storage permissions, please accept to use all functionalities")
+                        .setPositiveButton(
+                            "OK"
+                        ) { _, _ ->
+                            token?.continuePermissionRequest()
+                        }.create().show()
+                }
+            }).check()
+    }
 }

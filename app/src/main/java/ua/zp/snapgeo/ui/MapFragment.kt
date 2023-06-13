@@ -8,6 +8,9 @@ import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.Color
+import android.graphics.drawable.Drawable
 import android.location.Address
 import android.location.Geocoder
 import android.location.Location
@@ -25,6 +28,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
+import com.bumptech.glide.Glide
+import com.bumptech.glide.request.target.CustomTarget
+import com.bumptech.glide.request.transition.Transition
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationCallback
 import com.google.android.gms.location.LocationRequest
@@ -35,6 +41,8 @@ import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.GoogleMap
 import com.google.android.gms.maps.OnMapReadyCallback
 import com.google.android.gms.maps.SupportMapFragment
+import com.google.android.gms.maps.model.BitmapDescriptor
+import com.google.android.gms.maps.model.BitmapDescriptorFactory
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.MarkerOptions
@@ -43,6 +51,10 @@ import com.karumi.dexter.MultiplePermissionsReport
 import com.karumi.dexter.PermissionToken
 import com.karumi.dexter.listener.PermissionRequest
 import com.karumi.dexter.listener.multi.MultiplePermissionsListener
+import jp.wasabeef.glide.transformations.CropCircleWithBorderTransformation
+import jp.wasabeef.glide.transformations.CropSquareTransformation
+import jp.wasabeef.glide.transformations.RoundedCornersTransformation
+import jp.wasabeef.glide.transformations.RoundedCornersTransformation.CornerType
 import ua.zp.snapgeo.R
 import ua.zp.snapgeo.data.PhotoLocation
 import ua.zp.snapgeo.databinding.FragmentMapBinding
@@ -188,8 +200,28 @@ class MapFragment : Fragment(), OnMapReadyCallback {
 
     private fun addMarkerPhotoToMap(photoLocation: PhotoLocation) {
         val location = LatLng(photoLocation.latitude, photoLocation.longitude)
-        mGoogleMap.addMarker(MarkerOptions().position(location).title(photoLocation.address))
-        mGoogleMap.moveCamera(CameraUpdateFactory.newLatLngZoom(location, 15f))
+
+        Glide.with(requireContext())
+            .asBitmap()
+            .load(photoLocation.photoUri)
+            .override(100, 100)
+            .transform(RoundedCornersTransformation(10,0))
+            .into(object : CustomTarget<Bitmap>(){
+                override fun onResourceReady(resource: Bitmap, transition: Transition<in Bitmap>?) {
+                    mGoogleMap.addMarker(
+                        MarkerOptions()
+                            .position(location)
+                            .title(photoLocation.address)
+                            .icon(BitmapDescriptorFactory.fromBitmap(resource))
+                    )
+                    mGoogleMap.moveCamera(CameraUpdateFactory.newLatLngZoom(location, 15f))
+                }
+
+                override fun onLoadCleared(placeholder: Drawable?) {
+
+                }
+            }
+        )
     }
 
     private fun takePictureAndSaveToGallery() {
@@ -240,7 +272,7 @@ class MapFragment : Fragment(), OnMapReadyCallback {
             val latitude = latLong[0].toDouble()
             val longitude = latLong[1].toDouble()
             val address = getAddressFromCoordinates(requireContext(), latitude, longitude)
-            return PhotoLocation(latitude, longitude, address)
+            return PhotoLocation(latitude, longitude, address, photoUri)
         }
 
         return null

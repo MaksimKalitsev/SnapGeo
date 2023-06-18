@@ -37,13 +37,14 @@ import com.google.android.gms.maps.OnMapReadyCallback
 import com.google.android.gms.maps.SupportMapFragment
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
-import com.google.android.gms.maps.model.MarkerOptions
+import com.google.maps.android.clustering.ClusterManager
 import com.karumi.dexter.Dexter
 import com.karumi.dexter.MultiplePermissionsReport
 import com.karumi.dexter.PermissionToken
 import com.karumi.dexter.listener.PermissionRequest
 import com.karumi.dexter.listener.multi.MultiplePermissionsListener
 import ua.zp.snapgeo.R
+import ua.zp.snapgeo.data.ItemMarker
 import ua.zp.snapgeo.data.PhotoLocation
 import ua.zp.snapgeo.databinding.FragmentMapBinding
 import java.io.File
@@ -72,6 +73,8 @@ class MapFragment : Fragment(), OnMapReadyCallback {
 
     private lateinit var takePictureResult: ActivityResultLauncher<Intent>
 
+    private lateinit var clusterManager: ClusterManager<ItemMarker>
+
 
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?,
@@ -94,7 +97,7 @@ class MapFragment : Fragment(), OnMapReadyCallback {
                 if (result.resultCode == Activity.RESULT_OK) {
                     val photoLocation = getPhotoLocation(photoURI)
                     photoLocation?.let {
-                        addMarkerPhotoToMap(it)
+                        addMarkerPhotoToMapCluster(it, photoURI)
                     }
                 } else {
                     // зняття фотографії було скасоване або відбулася помилка
@@ -108,6 +111,9 @@ class MapFragment : Fragment(), OnMapReadyCallback {
 
     override fun onMapReady(googleMap: GoogleMap) {
         mGoogleMap = googleMap
+        setupCluster()
+
+//        googleMap.uiSettings.isZoomControlsEnabled = true
 
         mLocationRequest =
             LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 12000).apply {
@@ -153,11 +159,11 @@ class MapFragment : Fragment(), OnMapReadyCallback {
 
                 val photoLocation = getPhotoLocation(contentUri)
                 photoLocation?.let {
-                    addMarkerPhotoToMap(it)
+                    addMarkerPhotoToMapCluster(it, contentUri)
                 }
             }
         }
-
+        clusterManager.cluster()
     }
 
     override fun onPause() {
@@ -167,29 +173,46 @@ class MapFragment : Fragment(), OnMapReadyCallback {
         mFusedLocationClient?.removeLocationUpdates(mLocationCallback)
     }
 
+    var shouldTrackLocation = true
     private var mLocationCallback: LocationCallback = object : LocationCallback() {
         override fun onLocationResult(locationResult: LocationResult) {
+
             val locationList = locationResult.locations
             if (locationList.size > 0) {
 
                 val location = locationList[locationList.size - 1]
                 mLastLocation = location
                 val latLng = LatLng(location.latitude, location.longitude)
+                if (shouldTrackLocation) {
+                    mGoogleMap.animateCamera(CameraUpdateFactory.newLatLng(latLng))
 
-                mGoogleMap.animateCamera(CameraUpdateFactory.newLatLng(latLng))
+                    val cameraPosition =
+                        CameraPosition.Builder().target(LatLng(latLng.latitude, latLng.longitude))
+                            .zoom(18f).build()
+                    mGoogleMap.animateCamera(CameraUpdateFactory.newCameraPosition(cameraPosition))
 
-                val cameraPosition =
-                    CameraPosition.Builder().target(LatLng(latLng.latitude, latLng.longitude))
-                        .zoom(18f).build()
-                mGoogleMap.animateCamera(CameraUpdateFactory.newCameraPosition(cameraPosition))
+                    shouldTrackLocation = false
+                }
             }
         }
     }
 
-    private fun addMarkerPhotoToMap(photoLocation: PhotoLocation) {
+    private fun setupCluster() {
+        clusterManager = ClusterManager(requireContext(), mGoogleMap)
+        val renderer = CustomClusterRenderer(requireContext(), mGoogleMap, clusterManager)
+        clusterManager.renderer = renderer
+        mGoogleMap.setOnCameraIdleListener(clusterManager)
+        mGoogleMap.setOnMarkerClickListener(clusterManager)
+    }
+
+    private fun addMarkerPhotoToMapCluster(photoLocation: PhotoLocation, photoUri: Uri) {
         val location = LatLng(photoLocation.latitude, photoLocation.longitude)
-        mGoogleMap.addMarker(MarkerOptions().position(location).title(photoLocation.address))
-        mGoogleMap.moveCamera(CameraUpdateFactory.newLatLngZoom(location, 15f))
+        val title = photoLocation.address
+        val snippet = ""
+        val itemMarker = ItemMarker(location, title, snippet, photoUri)
+        clusterManager.addItem(itemMarker)
+//            mGoogleMap.addMarker(MarkerOptions().position(location).title(photoLocation.address))
+//            mGoogleMap.moveCamera(CameraUpdateFactory.newLatLngZoom(location, 15f))
     }
 
     private fun takePictureAndSaveToGallery() {
@@ -209,7 +232,8 @@ class MapFragment : Fragment(), OnMapReadyCallback {
                 }
 
                 val resolver = requireContext().contentResolver
-                photoURI = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)!!
+                photoURI =
+                    resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)!!
 
                 takePictureIntent.putExtra(MediaStore.EXTRA_OUTPUT, photoURI)
                 takePictureResult.launch(takePictureIntent)
